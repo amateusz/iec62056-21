@@ -55,24 +55,17 @@ class Iec6205621Client:
         self.password = password
         self.battery_powered = battery_powered
         self.identification = None
-        self._switchover_baudrate_char = None
+        self.switchover_baudrate_char = None
         self.manufacturer_id = None
         self.use_short_reaction_time = False
         self.error_parser = error_parser_class()
-        self._current_baudrate: int = 300
-
-        if self.transport.TRANSPORT_REQUIRES_ADDRESS and not self.device_address:
-            raise exceptions.Iec6205621ClientError(
-                f"The transported used ({self.transport}) requires a device address "
-                f"and none was supplied."
-            )
 
     @property
     def switchover_baudrate(self):
         """
-        Shortcut to get the baud rate for the switchover.
+        Shoirtcut to get the baud rate for the switchover.
         """
-        return self.BAUDRATES_MODE_C.get(self._switchover_baudrate_char)
+        return self.BAUDRATES_MODE_C.get(self.switchover_baudrate_char)
 
     def read_single_value(self, address, additional_data="1"):
         """
@@ -83,10 +76,6 @@ class Iec6205621Client:
         :return:
         """
         # TODO Can't find documentation on why the additional_data of 1 is needed.
-        #  LIS-200 Specific?
-
-        # TODO: When not using the additional data on an EMH meter we get an ack back.
-        #   a bit later we get the break message. Is the device waiting?
 
         request = messages.CommandMessage.for_single_read(address, additional_data)
         logger.info(f"Sending read request: {request}")
@@ -156,7 +145,8 @@ class Iec6205621Client:
         ident_msg = self.read_identification()
 
         # Setting the baudrate to the one propsed by the device.
-        self._switchover_baudrate_char = ident_msg.switchover_baudrate_char
+        self.switchover_baudrate_char = str(ident_msg.switchover_baudrate_char)
+
         self.identification = ident_msg.identification
         self.manufacturer_id = ident_msg.manufacturer
 
@@ -175,6 +165,8 @@ class Iec6205621Client:
 
         self.ack_with_option_select("programming")
 
+        self.transport.switch_baudrate(self.switchover_baudrate)
+
         # receive password request
         pw_req = self.read_response()
 
@@ -186,6 +178,7 @@ class Iec6205621Client:
         """
         self.startup()
         self.ack_with_option_select("readout")
+        self.transport.switch_baudrate(self.switchover_baudrate)
         logger.info(f"Reading standard readout from device.")
         response = self.read_response()
         return response
@@ -197,8 +190,8 @@ class Iec6205621Client:
         :param password:
         """
         _pw = password or self.password
-        data_set = messages.DataSet(value=_pw)
-        cmd = messages.CommandMessage(command="P", command_type="1", data_set=data_set)
+        data_set = messages.DataSet(address="", value=_pw)
+        cmd = messages.CommandMessage(command="P", command_type=1, data_set=data_set)
         logger.info("Sending password to meter")
         self.transport.send(cmd.to_bytes())
 
@@ -208,9 +201,7 @@ class Iec6205621Client:
         communication.
         """
         logger.info("Sending BREAK message to end communication")
-        break_msg = messages.CommandMessage(
-            command="B", command_type="0", data_set=None
-        )
+        break_msg = messages.CommandMessage(command="B", command_type=0, data_set=None)
         self.transport.send(break_msg.to_bytes())
 
     def ack_with_option_select(self, mode):
@@ -222,20 +213,13 @@ class Iec6205621Client:
 
         :param mode:
         """
-        # TODO: allow the client to suggest a new baudrate to the devices instead of
-        #  the devices proposed one.
-
         mode_char = self.MODE_CONTROL_CHARACTER[mode]
-
         ack_message = messages.AckOptionSelectMessage(
-            mode_char=mode_char, baud_char=self._switchover_baudrate_char
+            mode_char=mode_char, baud_char=self.switchover_baudrate_char
         )
         logger.info(f"Sending AckOptionsSelect message: {ack_message}")
         self.transport.send(ack_message.to_bytes())
         self.rest()
-        self.transport.switch_baudrate(
-            baud=self.BAUDRATES_MODE_C[self._switchover_baudrate_char]
-        )
 
     def send_init_request(self):
         """
@@ -246,7 +230,11 @@ class Iec6205621Client:
          you want to talk to by adding the address in the request.
 
         """
-        request = messages.RequestMessage(device_address=self.device_address)
+        if self.transport.TRANSPORT_REQUIRES_ADDRESS:
+            request = messages.RequestMessage(device_address=self.device_address)
+        else:
+            request = messages.RequestMessage()
+
         logger.info(f"Sending request message: {request}")
         self.transport.send(request.to_bytes())
         self.rest()
