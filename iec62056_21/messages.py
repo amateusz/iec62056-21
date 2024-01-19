@@ -134,7 +134,7 @@ class DataLine(Iec6205621Data):
 class DataBlock(Iec6205621Data):
     """
     A data block is a list of DataLines, each ended with a the line end characters
-    \n\r
+    \r\n
     """
 
     def __init__(self, data_lines):
