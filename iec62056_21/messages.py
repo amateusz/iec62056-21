@@ -142,7 +142,7 @@ class DataBlock(Iec6205621Data):
 
     def to_representation(self):
         lines_rep = [
-            (line.to_representation() + constants.LINE_END) for line in self.data_lines
+            (line.to_representation() + constants.LINE_END) for line in self.data_lines if line.data_sets
         ]
         return "".join(lines_rep)
 
